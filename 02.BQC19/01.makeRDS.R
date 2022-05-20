@@ -1,291 +1,373 @@
 setwd("/home/richards/tomoko.nakanishi/09.COVID19/scratch/05.BQC/10.longCOVID")
 
-data <- read.csv("/home/richards/tomoko.nakanishi/scratch/09.COVID19/05.BQC/BQC_phenotype/Release5/Clinical_Phenotypic/redcap_clinical_data-2021-12-09.csv", header = T, fileEncoding="latin1", sep="\t")
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(data.table)
 
-data$Date.of.earliest.symptom.s..[data$Date.of.earliest.symptom.s.. == ""] <- NA
-data <- data %>% group_by(BQC.ID) %>% 
-  tidyr::fill(Date.of.earliest.symptom.s.., .direction = "down") %>%
-  ungroup()
+##define COVID19 status
 
-data$Final.COVID.status.[data$Final.COVID.status. == ""] <- NA
-data <- data %>% group_by(BQC.ID) %>% 
-  tidyr::fill(Final.COVID.status., .direction = "down") %>%
-  ungroup()
-data[data$BQC.ID == "BQC12101",c("BQC.ID", "Final.COVID.status.")]
+pheno_raw <- read.csv("/project/richards/restricted/bqc19_release6/Clinical_Phenotypic/redcap_clinical_data_raw_2022-03-24.csv", header = T, fileEncoding="latin1", sep="\t")
 
-data$Has.the.participant.been.hospitalized.or.is.the.participant.seen.on.an.outpatient.[data$Has.the.participant.been.hospitalized.or.is.the.participant.seen.on.an.outpatient. == ""] <- NA
-data <- data %>% group_by(BQC.ID) %>% 
-  tidyr::fill(Has.the.participant.been.hospitalized.or.is.the.participant.seen.on.an.outpatient., .direction = "down") %>%
-  ungroup()
+pheno <- pheno_raw %>% select(BQCID, covidstatus, contains("covidtest") & (ends_with("_date") | ends_with("_result")), sx_date,sx_date_na,
+                              consverbpa,
+                              dconsverbpa,
+                              age)
 
-data <- data %>% mutate(hospital = case_when(Has.the.participant.been.hospitalized.or.is.the.participant.seen.on.an.outpatient. == "Hospitalized" ~ 1,
-                                             Has.the.participant.been.hospitalized.or.is.the.participant.seen.on.an.outpatient. == "Outpatient" ~ 0,
-                                               TRUE ~ -1),
-                        covid19_test = case_when(Final.COVID.status. == "Positive" ~ 1,
-                                                   Final.COVID.status. == "Negative" ~ 0,
-                                                   TRUE ~ -1))
+pheno[pheno == ""] <- NA
 
-data <- data %>% mutate(COVIDSx = case_when(Does.the.participant.report.persistent.symptoms.related.to.SARS.CoV.2.infection. == "Yes" ~ 1,
-                                            Does.the.participant.report.persistent.symptoms.related.to.SARS.CoV.2.infection. == "No" ~ 0,
-                                            TRUE ~ -1))
+pheno <- pheno %>% select(c("BQCID","covidstatus", "sx_date", ends_with("result"), ends_with("date")))
+
+pheno1 <- pheno %>% mutate_at(vars(ends_with("result")),as.character) %>%
+  pivot_longer(cols = c(-BQCID, -covidstatus, -sx_date),
+               names_to = c( "Store",".value"),
+               names_sep =  "_")
+
+covid_tests <- pheno1 %>% filter(!is.na(date) | !is.na(result)) %>% mutate(date=date(date),result=as.numeric(result))
+
+covid_tests$result <- factor(covid_tests$result,levels=c(0,1,2), labels=c("Positive","Negative","Equivocal"))
+
+##first positive/negative test 
+
+# ignore any test that doesn't have a date.....
+first_covid_test <- covid_tests %>% subset(!is.na(date)) %>% group_by(BQCID) %>%
+  mutate(covid19_test_result = case_when(any(result == "Positive") ~ "Positive",
+                                         any(result == "Equivocal") ~ "Indeterminate",
+                                         any(result == "Negative") ~ "Negative",
+                                         TRUE ~ "Unavailable"
+  ),
+  first_covid19_test_date = case_when(
+    any(result == "Positive")  ~ min(date[result == "Positive"]),
+    any(result == "Equivocal") ~ min(date[result == "Equivocal"]),
+    any(result == "Negative")  ~ min(date[result == "Negative"]),
+    TRUE ~ date(NA)
+  )) %>%
+  ungroup() 
+
+reinfection <- pheno_raw %>% filter(avis_reinfx == 1) %>% dplyr::select(BQCID) %>% unique()
 
 
-data <- data %>% mutate(Sx_tremor = case_when(Seizure.. == "Yes" ~ 1,
-                                              Seizure.. == "No" ~ 0),
-                        Sx_confusion = case_when(Confusion...altered.mental.status.. == "Yes" ~ 1,
-                                                 Confusion...altered.mental.status.. == "No" ~ 0),
-                        Sx_nausia = case_when(Nausea...vomiting.. == "Yes" ~ 1,
-                                              Nausea...vomiting.. == "No" ~ 0),
-                        Sx_earpain = case_when(Ear.pain.. == "Yes" ~ 1,
-                                               Ear.pain.. == "No" ~ 0),
-                        Sx_smell = case_when(Loss.of.taste...lost.of.smell.. == "Yes" ~ 1,
-                                             Loss.of.taste...lost.of.smell.. == "No" ~ 0),
-                        Sx_hoarseness = case_when(Trouble.speaking..Aphasia...Dysphasia... == "Yes" ~ 1,
-                                                  Trouble.speaking..Aphasia...Dysphasia... == "No" ~ 0),
-                        Sx_appetite = case_when(Loss.of.appetite.. == "Yes" ~ 1,
-                                                Loss.of.appetite.. == "No" ~ 0),
-                        Sx_diarrhea = case_when(Diarrhea.. == "Yes" ~ 1,
-                                                Diarrhea.. == "No" ~ 0),
-                        Sx_weakness = case_when(Extremity.weakness.or.numbness.. == "Yes" ~ 1,
-                                                Extremity.weakness.or.numbness.. == "No" ~ 0),
-                        Sx_SOB = case_when(Shortness.of.breath..Dyspnea... == "Yes" ~ 1,
-                                           Shortness.of.breath..Dyspnea... == "No" ~ 0),
-                        Sx_sorethroat = case_when(Sore.throat.. == "Yes" ~ 1,
-                                                  Sore.throat.. == "No" ~ 0),
-                        Sx_runnynose = case_when(Runny.nose..Rhinorrhea... == "Yes" ~ 1,
-                                                 Runny.nose..Rhinorrhea... == "No" ~ 0),
-                        Sx_headache = case_when(Headache.. == "Yes" ~ 1,
-                                                Headache.. == "No" ~ 0),
-                        Sx_cough = case_when(Cough.. == "Yes" ~ 1,
-                                             Cough.. == "No" ~ 0),
-                        Sx_musclejointpain = case_when(Muscle.aches..Myalgia... == "Yes" ~ 1,
-                                                       Joint.pain..Arthralgia... == "Yes" ~ 1,
-                                                       Muscle.aches..Myalgia... == "No" ~ 0,
-                                                       Joint.pain..Arthralgia... == "No" ~ 0),
-                        Sx_fatigue = case_when(Fatigue.. == "Yes" ~ 1,
-                                               Fatigue.. == "No" ~ 0))
+first_covid_test <- first_covid_test %>% dplyr::select(BQCID, covid19_test_result, first_covid19_test_date) %>% unique()
 
-data <- data %>% mutate(Sx_any = case_when(Asymptomatic. == "No" ~ 1,
-                                           Sx_tremor == 1 ~ 1,
-                                           Sx_confusion == 1 ~ 1,
-                                           Sx_nausia == 1 ~ 1,
-                                           Sx_earpain == 1 ~ 1,
-                                           Sx_smell == 1 ~ 1,
-                                           Sx_hoarseness == 1 ~ 1,
-                                           Sx_appetite == 1 ~ 1,
-                                           Sx_diarrhea == 1 ~ 1,
-                                           Sx_weakness == 1 ~ 1,
-                                           Sx_SOB == 1 ~ 1,
-                                           Sx_sorethroat == 1 ~ 1,
-                                           Sx_runnynose == 1 ~ 1,
-                                           Sx_headache == 1 ~ 1,
-                                           Sx_cough == 1 ~ 1,
-                                           Sx_musclejointpain == 1 ~ 1,
-                                           Sx_fatigue == 1 ~ 1,
-                                           Asymptomatic. == "Yes" ~ 0,
-                                           Sx_tremor == 0 ~ 0,
-                                           Sx_confusion == 0 ~ 0,
-                                           Sx_nausia == 0 ~ 0,
-                                           Sx_earpain == 0 ~ 0,
-                                           Sx_smell == 0 ~ 0,
-                                           Sx_hoarseness == 0 ~ 0,
-                                           Sx_appetite == 0 ~ 0,
-                                           Sx_diarrhea == 0 ~ 0,
-                                           Sx_weakness == 0 ~ 0,
-                                           Sx_SOB == 0 ~ 0,
-                                           Sx_sorethroat == 0 ~ 0,
-                                           Sx_runnynose == 0 ~ 0,
-                                           Sx_headache == 0 ~ 0,
-                                           Sx_cough == 0 ~ 0,
-                                           Sx_musclejointpain == 0 ~ 0,
-                                           Sx_fatigue == 0 ~ 0
+if(dim(first_covid_test)[1] != length(unique(first_covid_test$BQCID))) stop("something is wrong.")
+
+
+###severity final
+icu_id <- pheno_raw %>% filter(icu == 1) %>% dplyr::select(BQCID) %>% unique()
+hosp_id <- pheno_raw %>% filter(admit == 1) %>% dplyr::select(BQCID) %>% unique()
+death_id <- pheno_raw %>% filter(death_dc == 1 | death == 1 | visit_status_spec == 3 | 
+                                   exit_reason == 0 | interview_whynot == 0 | covid_severity == 4) %>% dplyr::select(BQCID) %>% unique()
+resp_id <- pheno_raw %>% filter(respsupport___2 == 1 | respsupport___3 == 1 | respsupport___4 == 1 |
+                                  othersupport___4 == 1 | c_ards == 1 | c_ards_followup == 1 |
+                                  covid_severity == 3) %>% dplyr::select(BQCID) %>% unique()
+
+
+#WHO Covid Severity Scale
+first_covid_test <- first_covid_test %>% mutate(hospitalization = case_when(BQCID %in% icu_id$BQCID ~ 1,
+                                                                            BQCID %in% hosp_id$BQCID ~ 1,
+                                                                            TRUE ~ 0),
+                                                death = case_when(BQCID %in% death_id$BQCID ~ 1,
+                                                                  TRUE ~ 0),
+                                                reinfection = case_when(BQCID %in% reinfection$BQCID ~ 1,
+                                                                        TRUE ~ 0)
+                                                )
+
+
+pheno <- pheno_raw %>% mutate(sx_myalgia_anthralgia = case_when(sx_anthralgia == 1 ~ 1,
+                                                                  sx_myalgia == 1 ~ 1,
+                                                                  sx_anthralgia == 0 ~ 0,
+                                                                  sx_myalgia == 0 ~ 0))
+
+pheno <- pheno %>% mutate(sx_any = case_when(asymptomatic == 0 ~ 1,
+                                           sx_seizure == 1 ~ 1,
+                                           sx_confusion == 1 ~ 1,
+                                           sx_nausea == 1 ~ 1,
+                                           sx_ear_pain == 1 ~ 1,
+                                           sx_anosmia == 1 ~ 1,
+                                           sx_apha_dysphagia == 1 ~ 1,
+                                           sx_appetite == 1 ~ 1,
+                                           sx_diarrhea == 1 ~ 1,
+                                           sx_extremity == 1 ~ 1,
+                                           sx_dyspnea == 1 ~ 1,
+                                           sx_sore_traot == 1 ~ 1,
+                                           sx_rhinorrhea == 1 ~ 1,
+                                           sx_headache == 1 ~ 1,
+                                           sx_cough == 1 ~ 1,
+                                           sx_myalgia_anthralgia == 1 ~ 1,
+                                           sx_fatigue == 1 ~ 1,
+                                           asymptomatic == 1 ~ 0,
+                                           sx_seizure == 0 ~ 0,
+                                           sx_confusion == 0 ~ 0,
+                                           sx_nausea == 0 ~ 0,
+                                           sx_ear_pain == 0 ~ 0,
+                                           sx_anosmia == 0 ~ 0,
+                                           sx_apha_dysphagia == 0 ~ 0,
+                                           sx_appetite == 0 ~ 0,
+                                           sx_diarrhea == 0 ~ 0,
+                                           sx_extremity == 0 ~ 0,
+                                           sx_dyspnea == 0 ~ 0,
+                                           sx_sore_traot == 0 ~ 0,
+                                           sx_rhinorrhea == 0 ~ 0,
+                                           sx_headache == 0 ~ 0,
+                                           sx_cough == 0 ~ 0,
+                                           sx_myalgia_anthralgia == 0 ~ 0,
+                                           sx_fatigue == 0 ~ 0
                                            ))
 
-final <- data %>% group_by(BQC.ID) %>%
-  mutate(COVIDSx = max(COVIDSx, na.rm=T),
-         hospital = max(hospital, na.rm=T),
-         covid19_test = max(covid19_test, na.rm=T)) %>%
-  mutate_at(.vars=vars(colnames(data)[grepl("^Sx_", colnames(data))]), .funs=funs(max(., na.rm=T))) %>%
-  ungroup() %>% distinct(BQC.ID, .keep_all=TRUE)
-final <- final %>% mutate_at(.vars=vars(colnames(data)[grepl("^Sx_", colnames(data))]), .funs=funs(ifelse(is.infinite(.), NA, .)))  
 
-tmp <- final %>% select(BQC.ID, colnames(final)[grepl("^Sx_", colnames(final))]) 
 
-data1 <- data %>% filter(Date.of.follow.up. != "") %>% select(-colnames(final)[grepl("^Sx_", colnames(final))])
-data1 <- data1 %>% mutate(time =as.Date(Date.of.follow.up.) - as.Date(Date.of.earliest.symptom.s..))
+############
 
-data1 <- data1 %>% merge(tmp, by="BQC.ID")
+phenotypes <- c("sx_any", "sx_seizure", "sx_confusion", "sx_nausea", "sx_ear_pain", "sx_anosmia",
+                "sx_apha_dysphagia", "sx_appetite", "sx_diarrhea", "sx_extremity", "sx_dyspnea", 
+                "sx_sore_traot", "sx_rhinorrhea", "sx_headache", "sx_cough", "sx_myalgia_anthralgia",
+                "sx_fatigue")
+  
+pheno <- pheno %>% group_by(BQCID) %>%
+  mutate_at(.vars=vars(phenotypes), .funs=funs(max(., na.rm=T))) %>%
+  ungroup() %>% distinct(BQCID, .keep_all=TRUE)
 
-data1 <- data1 %>% mutate(Sx_tremor_PCS = case_when(Sx_tremor == 1 & Seizure..1 == "Yes" & time >= 28*2 ~ 1,
-                                                    Sx_tremor == 1 & Seizure..1 == "Yes" & time < 28*2 ~ 0,
-                                                    Sx_tremor == 1 & Seizure..1 == "No"~ 0,
-                                                    Sx_tremor == 0 ~ 0,
-                                                    TRUE ~ -1),
-                          Sx_confusion_PCS = case_when(Sx_confusion == 1 & Confusion...altered.mental.status...1 == "Yes" & time > 28*2 ~ 1,
-                                                       Sx_confusion == 1 & Confusion...altered.mental.status...1 == "Yes" & time < 28*2 ~ 0,
-                                                       Sx_confusion == 1 & Confusion...altered.mental.status...1 == "No"~ 0,
-                                                       Sx_confusion == 0 ~ 0,
-                                                       TRUE ~ -1),
-                          Sx_nausia_PCS = case_when(Sx_nausia == 1 & Nausea...vomiting...1 == "Yes" & time > 28*2 ~ 1,
-                                                    Sx_nausia == 1 & Nausea...vomiting...1 == "Yes" & time < 28*2 ~ 0,
-                                                    Sx_nausia == 1 & Nausea...vomiting...1 == "No"~ 0,
-                                                    Sx_nausia == 0 ~ 0,
-                                                    TRUE ~ -1),
-                          Sx_earpain_PCS = case_when(Sx_earpain == 1 & Ear.pain...1 == "Yes" & time > 28*2 ~ 1,
-                                                     Sx_earpain == 1 & Ear.pain...1 == "Yes" & time < 28*2 ~ 0,
-                                                     Sx_earpain == 1 & Ear.pain...1 == "No"~ 0,
-                                                     Sx_earpain == 0 ~ 0,
+pheno <- pheno %>% select(BQCID, phenotypes) 
+
+pheno1 <- pheno %>% mutate_at(.vars=vars(phenotypes), .funs=funs(ifelse(is.infinite(.), NA, .)))
+
+first_covid_test <- first_covid_test %>% left_join(pheno1, by="BQCID")
+
+if(dim(first_covid_test)[1] != length(unique(first_covid_test$BQCID))) stop("something is wrong.")
+
+
+pheno <- pheno_raw %>% filter(sx_date != "") %>% filter(redcap_event_name == "0_patient_identifi_arm_1")  %>% select(BQCID, sx_date) %>% unique()
+pheno <- pheno[!duplicated(pheno$BQCID),]
+pheno %>% filter(BQCID == "BQC17082")##reinfection
+first_covid_test <- first_covid_test %>% left_join(pheno, by="BQCID")
+
+if(dim(first_covid_test)[1] != length(unique(first_covid_test$BQCID))) stop("something is wrong.")
+
+
+pheno <- pheno_raw %>% filter(interview_date != "") %>% select(-c("sx_seizure", "sx_confusion", "sx_nausea", "sx_ear_pain", "sx_anosmia",
+                                                                  "sx_apha_dysphagia", "sx_appetite", "sx_diarrhea", "sx_extremity", "sx_dyspnea", 
+                                                                  "sx_sore_traot", "sx_rhinorrhea", "sx_headache", "sx_cough", 
+                                                                  "sx_fatigue", "sx_date"))
+
+pheno <- pheno %>% inner_join(first_covid_test, by="BQCID")
+pheno <- pheno %>% filter(!is.na(sx_date))
+
+pheno <- pheno %>% mutate(time = as.Date(interview_date) - as.Date(sx_date)) 
+
+pheno <- pheno %>% mutate(m_sx_myalgia_anthralgia = case_when(m_sx_anthralgia == 1 ~ 1,
+                                                              m_sx_myalgia == 1 ~ 1,
+                                                              m_sx_anthralgia == 0 ~ 0,
+                                                              m_sx_myalgia == 0 ~ 0))
+
+pheno <- pheno %>% mutate(sx_seizure_PCS = case_when(sx_seizure == 1 & m_sx_seizure == 1 & time >= 28*2 ~ 1,
+                                                     sx_seizure == 1 & m_sx_seizure == 0 & time >= 28*2 ~ 0,
+                                                     sx_seizure == 0 ~ 0,
                                                      TRUE ~ -1),
-                          Sx_smell_PCS = case_when(Sx_smell == 1 & Loss.of.taste...lost.of.smell...1 == "Yes" & time > 28*2 ~ 1,
-                                                   Sx_smell == 1 & Loss.of.taste...lost.of.smell...1 == "Yes" & time < 28*2 ~ 0,
-                                                   Sx_smell == 1 & Loss.of.taste...lost.of.smell...1 == "No"~ 0,
-                                                   Sx_smell == 0 ~ 0,
-                                                   TRUE ~ -1),
-                          Sx_hoarseness_PCS = case_when(Sx_hoarseness == 1 & Trouble.speaking..Aphasia...Dysphasia....1 == "Yes" & time > 28*2 ~ 1,
-                                                        Sx_hoarseness == 1 & Trouble.speaking..Aphasia...Dysphasia....1 == "Yes" & time < 28*2 ~ 0,
-                                                        Sx_hoarseness == 1 & Trouble.speaking..Aphasia...Dysphasia....1 == "No"~ 0,
-                                                        Sx_hoarseness == 0 ~ 0,
-                                                        TRUE ~ -1),
-                          Sx_appetite_PCS = case_when(Sx_appetite == 1 & Loss.of.appetite...1 == "Yes" & time > 28*2 ~ 1,
-                                                      Sx_appetite == 1 & Loss.of.appetite...1 == "Yes" & time < 28*2 ~ 0,
-                                                      Sx_appetite == 1 & Loss.of.appetite...1 == "No"~ 0,
-                                                      Sx_appetite == 0 ~ 0,
-                                                      TRUE ~ -1),
-                          Sx_diarrhea_PCS = case_when(Sx_diarrhea == 1 & Diarrhea...1 == "Yes" & time > 28*2 ~ 1,
-                                                      Sx_diarrhea == 1 & Diarrhea...1 == "Yes" & time < 28*2 ~ 0,
-                                                      Sx_diarrhea == 1 & Diarrhea...1 == "No"~ 0,
-                                                      Sx_diarrhea == 0 ~ 0,
-                                                      TRUE ~ -1),
-                          Sx_weakness_PCS = case_when(Sx_weakness == 1 & Extremity.weakness.or.numbness...1 == "Yes" & time > 28*2 ~ 1,
-                                                      Sx_weakness == 1 & Extremity.weakness.or.numbness...1 == "Yes" & time < 28*2 ~ 0,
-                                                      Sx_weakness == 1 & Extremity.weakness.or.numbness...1 == "No"~ 0,
-                                                      Sx_weakness == 0 ~ 0,
-                                                      TRUE ~ -1),
-                          Sx_SOB_PCS = case_when(Sx_SOB == 1 & Shortness.of.breath..Dyspnea....1 == "Yes" & time > 28*2  ~ 1,
-                                                 Sx_SOB == 1 & Shortness.of.breath..Dyspnea....1 == "Yes" & time < 28*2 ~ 0,
-                                                 Sx_SOB == 1 & Shortness.of.breath..Dyspnea....1 == "No"~ 0,
-                                                 Sx_SOB == 0 ~ 0,
-                                                 TRUE ~ -1),
-                          Sx_sorethroat_PCS = case_when(Sx_sorethroat == 1 & Sore.throat...1 == "Yes" & time > 28*2 ~ 1,
-                                                        Sx_sorethroat == 1 & Sore.throat...1 == "Yes" & time < 28*2 ~ 0,
-                                                        Sx_sorethroat == 1 & Sore.throat...1 == "No"~ 0,
-                                                        Sx_sorethroat == 0 ~ 0,
-                                                        TRUE ~ -1),
-                          Sx_runnynose_PCS = case_when(Sx_runnynose == 1 & Runny.nose..Rhinorrhea....1 == "Yes" & time > 28*2 ~ 1,
-                                                       Sx_runnynose == 1 & Runny.nose..Rhinorrhea....1 == "Yes" & time < 28*2 ~ 0,
-                                                       Sx_runnynose == 1 & Runny.nose..Rhinorrhea....1 == "No"~ 0,
-                                                       Sx_runnynose == 0 ~ 0,
+                          sx_confusion_PCS = case_when(sx_confusion == 1 & m_sx_confusion == 1 & time >= 28*2 ~ 1,
+                                                       sx_confusion == 1 & m_sx_confusion == 0 & time >= 28*2 ~ 0,
+                                                       sx_confusion == 0 ~ 0,
                                                        TRUE ~ -1),
-                          Sx_headache_PCS = case_when(Sx_headache == 1 & Headache...1 == "Yes" & time > 28*2 ~ 1,
-                                                      Sx_headache == 1 & Headache...1 == "Yes" & time < 28*2 ~ 0,
-                                                      Sx_headache == 1 & Headache...1 == "No" ~ 0,
-                                                      Sx_headache == 0 ~ 0,
+                          sx_nausea_PCS = case_when(sx_nausea == 1 & m_sx_nausea == 1 & time >= 28*2 ~ 1,
+                                                    sx_nausea == 1 & m_sx_nausea == 0 & time >= 28*2 ~ 0,
+                                                    sx_nausea == 0 ~ 0,
+                                                    TRUE ~ -1),
+                          sx_ear_pain_PCS = case_when(sx_ear_pain == 1 & m_sx_ear_pain == 1 & time >= 28*2 ~ 1,
+                                                     sx_ear_pain == 1 & m_sx_ear_pain == 0 & time >= 28*2 ~ 0,
+                                                     sx_ear_pain == 0 ~ 0,
+                                                     TRUE ~ -1),
+                          sx_anosmia_PCS = case_when(sx_anosmia == 1 & m_sx_anosmia == 1 & time >= 28*2 ~ 1,
+                                                     sx_anosmia == 1 & m_sx_anosmia == 0 & time >= 28*2 ~ 0,
+                                                     sx_anosmia == 0 ~ 0,
                                                       TRUE ~ -1),
-                          Sx_cough_PCS = case_when(Sx_cough == 1 & Cough...1 == "Yes" & time > 28*2 ~ 1,
-                                                   Sx_cough == 1 & Cough...1 == "Yes" & time < 28*2 ~ 0,
-                                                   Sx_cough == 1 & Cough...1 == "No"~ 0,
-                                                   Sx_cough == 0 ~ 0,
+                          sx_apha_dysphagia_PCS = case_when(sx_apha_dysphagia == 1 & m_sx_apha_dysphagia == 1 & time >= 28*2 ~ 1,
+                                                            sx_apha_dysphagia == 1 & m_sx_apha_dysphagia == 0 & time >= 28*2 ~ 0,
+                                                            sx_apha_dysphagia == 0 ~ 0,
+                                                            TRUE ~ -1),
+                          sx_appetite_PCS = case_when(sx_appetite == 1 & m_sx_appetite == 1 & time >= 28*2 ~ 1,
+                                                      sx_appetite == 1 & m_sx_appetite == 0 & time >= 28*2 ~ 0,
+                                                      sx_appetite == 0 ~ 0,
+                                                      TRUE ~ -1),
+                          sx_diarrhea_PCS = case_when(sx_diarrhea == 1 & m_sx_diarrhea == 1 & time >= 28*2 ~ 1,
+                                                      sx_diarrhea == 1 & m_sx_diarrhea == 0 & time >= 28*2 ~ 0,
+                                                      sx_diarrhea == 0 ~ 0,
+                                                      TRUE ~ -1),
+                          sx_extremity_PCS = case_when(sx_extremity == 1 & m_sx_extremity == 1 & time >= 28*2 ~ 1,
+                                                       sx_extremity == 1 & m_sx_extremity == 0 & time >= 28*2 ~ 0,
+                                                       sx_extremity == 0 ~ 0,
+                                                       TRUE ~ -1),
+                          sx_dyspnea_PCS = case_when(sx_dyspnea == 1 & m_sx_dyspnea == 1 & time >= 28*2 ~ 1,
+                                                     sx_dyspnea == 1 & m_sx_dyspnea == 0 & time >= 28*2 ~ 0,
+                                                     sx_dyspnea == 0 ~ 0,
+                                                 TRUE ~ -1),
+                          sx_sore_traot_PCS = case_when(sx_sore_traot == 1 & m_sx_sore_traot == 1 & time >= 28*2 ~ 1,
+                                                        sx_sore_traot == 1 & m_sx_sore_traot == 0 & time >= 28*2 ~ 0,
+                                                        sx_sore_traot == 0 ~ 0,
+                                                        TRUE ~ -1),
+                          sx_rhinorrhea_PCS = case_when(sx_rhinorrhea == 1 & m_sx_rhinorrhea == 1 & time >= 28*2 ~ 1,
+                                                        sx_rhinorrhea == 1 & m_sx_rhinorrhea == 0 & time >= 28*2 ~ 0,
+                                                        sx_rhinorrhea == 0 ~ 0,
+                                                        TRUE ~ -1),
+                          sx_headache_PCS = case_when(sx_headache == 1 & m_sx_headache == 1 & time >= 28*2 ~ 1,
+                                                      sx_headache == 1 & m_sx_headache == 0 & time >= 28*2 ~ 0,
+                                                      sx_headache == 0 ~ 0,
+                                                      TRUE ~ -1),
+                          sx_cough_PCS = case_when(sx_cough == 1 & m_sx_cough == 1 & time >= 28*2 ~ 1,
+                                                   sx_cough == 1 & m_sx_cough == 0 & time >= 28*2 ~ 0,
+                                                   sx_cough == 0 ~ 0,
                                                    TRUE ~ -1),
-                          Sx_musclejointpain_PCS = case_when(Sx_musclejointpain == 1 & (Muscle.aches..Myalgia....1 == "Yes" | Joint.pain..Arthralgia....1 == "Yes") & time > 28*2 ~ 1,
-                                                             Sx_musclejointpain == 1 & (Muscle.aches..Myalgia....1 == "Yes" |  Joint.pain..Arthralgia....1 == "Yes") & time < 28*2 ~ 0,
-                                                             Sx_musclejointpain == 1 & (Muscle.aches..Myalgia....1 == "No" | Joint.pain..Arthralgia....1 == "No") ~ 0,
-                                                             Sx_musclejointpain == 0 ~ 0,
-                                                             TRUE ~ -1),
-                          Sx_fatigue_PCS = case_when(Sx_fatigue == 1 & Fatigue...1 == "Yes" & time > 28*2 ~ 1,
-                                                     Sx_fatigue == 1 & Fatigue...1 == "Yes" & time < 28*2 ~ 0,
-                                                     Sx_fatigue == 1 & Fatigue...1 == "No"~ 0,
-                                                     Sx_fatigue == 0 ~ 0,
+                          sx_myalgia_anthralgia_PCS = case_when(sx_myalgia_anthralgia == 1 & m_sx_myalgia_anthralgia == 1 & time >= 28*2 ~ 1,
+                                                                sx_myalgia_anthralgia == 1 & m_sx_myalgia_anthralgia == 0 & time >= 28*2 ~ 0,
+                                                                sx_myalgia_anthralgia == 0 ~ 0,
+                                                                TRUE ~ -1),
+                          sx_fatigue_PCS = case_when(sx_fatigue == 1 & m_sx_fatigue == 1 & time >= 28*2 ~ 1,
+                                                     sx_fatigue == 1 & m_sx_fatigue == 0 & time >= 28*2 ~ 0,
+                                                     sx_fatigue == 0 ~ 0,
                                                      TRUE ~ -1))
 
-data1 <- data1 %>% mutate(Sx_any_PCS = case_when(Sx_any == 0 ~ 0,
-                                                 Sx_tremor_PCS == 1 ~ 1,
-                                                 Sx_confusion_PCS == 1 ~ 1,
-                                                 Sx_nausia_PCS == 1 ~ 1,
-                                                 Sx_earpain_PCS == 1 ~ 1,
-                                                 Sx_smell_PCS == 1 ~ 1,
-                                                 Sx_hoarseness_PCS == 1 ~ 1,
-                                                 Sx_appetite_PCS == 1 ~ 1,
-                                                 Sx_diarrhea_PCS == 1 ~ 1,
-                                                 Sx_weakness_PCS == 1 ~ 1,
-                                                 Sx_SOB_PCS == 1 ~ 1,
-                                                 Sx_sorethroat_PCS == 1 ~ 1,
-                                                 Sx_runnynose_PCS == 1 ~ 1,
-                                                 Sx_headache_PCS == 1 ~ 1,
-                                                 Sx_cough_PCS == 1 ~ 1,
-                                                 Sx_musclejointpain_PCS == 1 ~ 1,
-                                                 Sx_fatigue_PCS == 1 ~ 1,
-                                                 Sx_tremor_PCS == 0 ~ 0,
-                                                 Sx_confusion_PCS == 0 ~ 0,
-                                                 Sx_nausia_PCS == 0 ~ 0,
-                                                 Sx_earpain_PCS == 0 ~ 0,
-                                                 Sx_smell_PCS == 0 ~ 0,
-                                                 Sx_hoarseness_PCS == 0 ~ 0,
-                                                 Sx_appetite_PCS == 0 ~ 0,
-                                                 Sx_diarrhea_PCS == 0 ~ 0,
-                                                 Sx_weakness_PCS == 0 ~ 0,
-                                                 Sx_SOB_PCS == 0 ~ 0,
-                                                 Sx_sorethroat_PCS == 0 ~ 0,
-                                                 Sx_runnynose_PCS == 0 ~ 0,
-                                                 Sx_headache_PCS == 0 ~ 0,
-                                                 Sx_cough_PCS == 0 ~ 0,
-                                                 Sx_musclejointpain_PCS == 0 ~ 0,
-                                                 Sx_fatigue_PCS == 0 ~ 0,
+pheno <- pheno %>% mutate(sx_any_PCS = case_when(sx_any == 0 ~ 0,
+                                                 sx_seizure_PCS == 1 ~ 1,
+                                                 sx_confusion_PCS == 1 ~ 1,
+                                                 sx_nausea_PCS == 1 ~ 1,
+                                                 sx_ear_pain_PCS == 1 ~ 1,
+                                                 sx_anosmia_PCS == 1 ~ 1,
+                                                 sx_apha_dysphagia_PCS == 1 ~ 1,
+                                                 sx_appetite_PCS == 1 ~ 1,
+                                                 sx_diarrhea_PCS == 1 ~ 1,
+                                                 sx_extremity_PCS == 1 ~ 1,
+                                                 sx_dyspnea_PCS == 1 ~ 1,
+                                                 sx_sore_traot_PCS == 1 ~ 1,
+                                                 sx_rhinorrhea_PCS == 1 ~ 1,
+                                                 sx_headache_PCS == 1 ~ 1,
+                                                 sx_cough_PCS == 1 ~ 1,
+                                                 sx_myalgia_anthralgia_PCS == 1 ~ 1,
+                                                 sx_fatigue_PCS == 1 ~ 1,
+                                                 sx_seizure_PCS == 0 ~ 0,
+                                                 sx_confusion_PCS == 0 ~ 0,
+                                                 sx_nausea_PCS == 0 ~ 0,
+                                                 sx_ear_pain_PCS == 0 ~ 0,
+                                                 sx_anosmia_PCS == 0 ~ 0,
+                                                 sx_apha_dysphagia_PCS == 0 ~ 0,
+                                                 sx_appetite_PCS == 0 ~ 0,
+                                                 sx_diarrhea_PCS == 0 ~ 0,
+                                                 sx_extremity_PCS == 0 ~ 0,
+                                                 sx_dyspnea_PCS == 0 ~ 0,
+                                                 sx_sore_traot_PCS == 0 ~ 0,
+                                                 sx_rhinorrhea_PCS == 0 ~ 0,
+                                                 sx_headache_PCS == 0 ~ 0,
+                                                 sx_cough_PCS == 0 ~ 0,
+                                                 sx_myalgia_anthralgia_PCS == 0 ~ 0,
+                                                 sx_fatigue_PCS == 0 ~ 0,
                                                  TRUE ~ -1))
 
-data1 <- data1 %>% mutate(longCOVID = case_when(COVIDSx == 1 & time > 28*2 & Final.COVID.status. == "Positive" ~ 1,
-                                                Sx_any_PCS == 1 & Final.COVID.status. == "Positive" ~ 1,
-                                                TRUE ~ 0))
+hist(as.numeric(pheno$time))
 
-tmp <- data1 %>% group_by(BQC.ID) %>%
-  mutate(longCOVID = max(longCOVID, na.rm=T)) %>%
-  mutate_at(.vars=vars(colnames(data1)[grepl("_PCS$", colnames(data1))]), .funs=funs(max(., na.rm=T))) %>%
-  ungroup() %>% distinct(BQC.ID, .keep_all=TRUE) %>% 
-  select(BQC.ID, longCOVID, colnames(data1)[grepl("_PCS$", colnames(data1))])
+phenotypes_PCS <- c("sx_any_PCS", "sx_seizure_PCS", "sx_confusion_PCS", "sx_nausea_PCS", "sx_ear_pain_PCS", 
+                    "sx_anosmia_PCS", "sx_apha_dysphagia_PCS", "sx_appetite_PCS", "sx_diarrhea_PCS", 
+                    "sx_extremity_PCS", "sx_dyspnea_PCS", "sx_sore_traot_PCS", "sx_rhinorrhea_PCS", 
+                    "sx_headache_PCS", "sx_cough_PCS", "sx_myalgia_anthralgia_PCS", "sx_fatigue_PCS")
 
-final <- final %>% merge(tmp, by="BQC.ID", all.x=T)
 
-final <- final %>% mutate(age = Age.at.arrival.,
-                          sex = ifelse(Sex.at.birth. == "Male", "0M", "F"),
-                          BMI = BMI.,
-                          com_asthma = ifelse(Asthma.. == "Yes", 1, 0),
-                          smoking = case_when(Smoking.status. == "Non-smoker" ~ "0Never",
-                                              Smoking.status. == "Former smoker" ~ "Past",
-                                              Smoking.status. == "Smoker" ~ "Current"),
-                          com_COPD = ifelse(COPD..emphysema..chronic.bronchitis... == "Yes", 1, 0),
-                          com_diabetes = ifelse(Diabetes.. == "Yes",1 , 0),
-                          com_cancer = ifelse(Malignant.neoplasm.. == "Yes", 1, 0),
-                          com_dementia = ifelse(Dementia.. == "Yes", 1, 0),
-                          com_hypertension = ifelse(Arterial.Hypertension.. == "Yes", 1, 0),
-                          com_autoimmune = ifelse(Rheumatologic.disease.. == "Yes", 1, 0)
+pheno <- pheno %>% group_by(BQCID) %>%
+  mutate_at(.vars=vars(phenotypes_PCS), .funs=funs(max(., na.rm=T))) %>%
+  ungroup() %>% distinct(BQCID, .keep_all=TRUE)
+
+pheno <- pheno %>% select(BQCID, phenotypes_PCS) 
+
+pheno1 <- pheno %>% mutate_at(.vars=vars(phenotypes_PCS), .funs=funs(ifelse(is.infinite(.), NA, .)))
+
+first_covid_test <- first_covid_test %>% left_join(pheno1, by="BQCID")
+if(dim(first_covid_test)[1] != length(unique(first_covid_test$BQCID))) stop("something is wrong.")
+
+
+pheno <- pheno_raw %>% filter(interview_date != "") %>% select(BQCID, interview_date, sx_report)
+pheno <- pheno %>% inner_join(first_covid_test, by="BQCID")
+pheno <- pheno %>% filter(!is.na(sx_date))
+
+pheno <- pheno %>% mutate(time = as.Date(interview_date) - as.Date(sx_date)) 
+pheno <- pheno %>% mutate(longCOVID = case_when(sx_report == 1 & time > 28*2 & covid19_test_result == "Positive" ~ 1,
+                                                sx_report == 0 & time > 28*2 & covid19_test_result == "Positive" ~ 0,
+                                                TRUE ~ -1))
+
+pheno <- pheno %>% select(BQCID, longCOVID)
+pheno <- pheno %>% group_by(BQCID) %>%
+  mutate_at(.vars=vars(longCOVID), .funs=funs(max(., na.rm=T))) %>%
+  ungroup() %>% distinct(BQCID, .keep_all=TRUE)
+
+first_covid_test <- first_covid_test %>% left_join(pheno, by="BQCID")
+if(dim(first_covid_test)[1] != length(unique(first_covid_test$BQCID))) stop("something is wrong.")
+
+
+pheno <- pheno_raw %>% filter(redcap_event_name == "0_patient_identifi_arm_1")
+
+pheno <- pheno %>% mutate(age = age,
+                          sex = ifelse(female == 1, "F", "0M"),
+                          BMI = bmi,
+                          com_asthma = phx_asthma,
+                          smoking = case_when(smoking == 0 ~ "0Never",
+                                              smoking == 2 ~ "Past",
+                                              smoking %in% c(1,3) ~ "Current"),
+                          com_COPD = phx_copd,
+                          com_diabetes = phx_diabetes,
+                          com_cancer = phx_cancer,
+                          com_dementia = phx_dementia,
+                          com_hypertension = phx_htn,
+                          com_autoimmune = phx_rheum
 )
-final <- final %>% mutate(age_range = case_when(age < 60 ~ "<60",
+pheno <- pheno %>% mutate(age_range = case_when(age < 60 ~ "<60",
                                                 age < 70 & age >= 60 ~ "0Age60-70",
                                                 age < 80 & age >= 70 ~ "70-80",
                                                 age >= 80 ~ ">80"),
                           obesity = case_when(BMI >= 30 ~ 1,
                                               BMI < 30 ~ 0))
 
-final <- final %>% mutate(Sx_any_PCS = ifelse(Sx_any == 0, 0, Sx_any_PCS),
-                          Sx_tremor_PCS = ifelse(Sx_tremor == 0, 0, Sx_tremor_PCS),
-                          Sx_confusion_PCS = ifelse(Sx_confusion == 0, 0, Sx_confusion_PCS),
-                          Sx_nausia_PCS = ifelse(Sx_nausia == 0, 0, Sx_nausia_PCS),
-                          Sx_earpain_PCS = ifelse(Sx_earpain == 0, 0, Sx_earpain_PCS),
-                          Sx_smell_PCS = ifelse(Sx_smell == 0, 0, Sx_smell_PCS),
-                          Sx_hoarseness_PCS = ifelse(Sx_hoarseness == 0, 0, Sx_hoarseness_PCS),
-                          Sx_appetite_PCS = ifelse(Sx_appetite == 0, 0, Sx_appetite_PCS),
-                          Sx_diarrhea_PCS = ifelse(Sx_diarrhea == 0, 0, Sx_diarrhea_PCS),
-                          Sx_weakness_PCS = ifelse(Sx_weakness == 0, 0, Sx_weakness_PCS),
-                          Sx_SOB_PCS = ifelse(Sx_SOB == 0, 0, Sx_SOB_PCS),
-                          Sx_sorethroat_PCS = ifelse(Sx_sorethroat == 0, 0, Sx_sorethroat_PCS),
-                          Sx_runnynose_PCS = ifelse(Sx_runnynose == 0, 0, Sx_runnynose_PCS),
-                          Sx_headache_PCS = ifelse(Sx_headache == 0, 0, Sx_headache_PCS),
-                          Sx_cough_PCS = ifelse(Sx_cough == 0, 0, Sx_cough_PCS),
-                          Sx_musclejointpain_PCS = ifelse(Sx_musclejointpain == 0, 0, Sx_musclejointpain_PCS),
-                          Sx_fatigue_PCS = ifelse(Sx_fatigue == 0, 0, Sx_fatigue_PCS),
-                          Sx_tremor_PCS = ifelse(Sx_tremor == 0, 0, Sx_tremor_PCS),
-                          Sx_tremor_PCS = ifelse(Sx_tremor == 0, 0, Sx_tremor_PCS))
+
+pheno1 <- pheno %>% select(BQCID, age, sex, BMI, com_asthma, smoking,
+                           com_COPD, com_diabetes, com_cancer, com_dementia, 
+                           com_hypertension, com_autoimmune, age_range, obesity)
+pheno1 <- pheno1[!duplicated(pheno1$BQCID),]
+
+first_covid_test <- first_covid_test %>% left_join(pheno1, by="BQCID")
+
+if(dim(first_covid_test)[1] != length(unique(first_covid_test$BQCID))) stop("something is wrong.")
+
+##vaccination
+pheno <- pheno_raw %>% select(BQCID, colnames(pheno_raw)[grepl("vaccin", colnames(pheno_raw))])
+pheno <- pheno %>% filter(!is.na(vaccinate)) %>%
+  select(BQCID, vaccinate, vaccin_date1, vaccin_dosenum, vaccin_date2)
+  
+first_covid_test <- first_covid_test %>% left_join(pheno, by="BQCID")
+if(dim(first_covid_test)[1] != length(unique(first_covid_test$BQCID))) stop("something is wrong.")
+
+first_covid_test <- first_covid_test %>% mutate(sx_any_PCS = ifelse(longCOVID == 1, 1, sx_any_PCS))
+first_covid_test <- first_covid_test %>% mutate_at(.vars=vars(phenotypes_PCS, phenotypes), .funs=funs(ifelse(.==-1, NA, .)))
+first_covid_test <- first_covid_test %>% mutate(prevaccination = case_when(as.Date(first_covid19_test_date) - as.Date(vaccin_date2) >= 14 ~ 2,
+                                                                           as.Date(first_covid19_test_date) - as.Date(vaccin_date1) >= 14 ~ 1,
+                                                                           as.Date(first_covid19_test_date) - as.Date(vaccin_date1) < 14 ~ 0,
+                                                                           vaccinate == 0 ~ 0
+                                                                           ))
+
+first_covid_test %>% filter(covid19_test_result %in% c("Positive", "Negative")) %>% saveRDS("clinical_bqc19.rds")
+
+data <- readRDS("clinical_bqc19.rds")
+pheno <- pheno_raw %>% filter(BQCID %in% data$BQCID)
+pheno %>% filter(BQCID == "BQC17082") %>% select(BQCID, redcap_event_name)
+pheno <- pheno %>% filter(!(BQCID == "BQC17082" & sx_date == "2021-08-31"))
+pheno <- pheno %>% filter(!(BQCID == "BQC17082" & redcap_event_name %in% c("m01_arm_1", "m03_arm_1")))
+pheno <- pheno %>% filter(!(BQCID == "BQC17082" & redcap_event_name %in% c("m06_arm_1") & interview_date == "2022-02-23"))
+
+pheno <- pheno %>% left_join(data, by="BQCID")
+tmp <- pheno %>% group_by(BQCID) %>%
+  mutate(time = max(as.Date(interview_date) - as.Date(first_covid19_test_date), na.rm=T)) %>%
+           distinct(BQCID, .keep_all=TRUE)
+tmp <- tmp %>% mutate(time = ifelse(is.infinite(time), NA, time))
+
+negative <- tmp %>% filter(time < 0)
 
 
-final %>% saveRDS("clinical_bqc19.rds")
+pheno %>% filter(BQCID %in% negative$BQCID) %>% select(BQCID, first_covid19_test_date, interview_date)
 
-final <- readRDS("clinical_bqc19.rds")
+tmp <- tmp %>% mutate(time = ifelse(is.infinite(time) | time < 0, NA, time))
+hist(tmp$time)
+quantile(tmp$time, na.rm=T)#144
+
