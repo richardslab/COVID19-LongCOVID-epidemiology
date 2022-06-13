@@ -1,91 +1,63 @@
 setwd("/home/richards/tomoko.nakanishi/09.COVID19/scratch/01.UKBB/01.GWAS/20210816/")
 
+library(data.table)
+library(tidyr)
+library(dplyr)
+
 t <- readRDS("LongCOVID.rds")
 
-##COVID status
-test1 <- fread("/home/richards/tomoko.nakanishi/09.COVID19/src/01.UKBB/01.GWAS/data/covid19_result_england_20211007.txt.gz")
+covid1 <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/covid19_result_england_20210930.txt.gz")
+covid2 <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/covid19_result_scotland_20210831.txt.gz")
+covid3 <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/covid19_result_wales_20210831.txt.gz")
 
-t1 <- test1
-t2 <- data.frame(unique(t1$eid))
-colnames(t2) <- "eid"
-t2$status <- 0
-t2$COVIDdate <- 0
-t2$hospital <- 0
-for(i in seq(1,dim(t2)[1])){
-  tmp <- t1[t1$eid == t2$eid[i],]
-  a <- ifelse(any(tmp$result == 1), 1, 0)
-  b <- ifelse(any(tmp$result == 1), min(as.Date(tmp$specdate[tmp$result == 1], format="%d/%m/%Y")), max(as.Date(tmp$specdate[tmp$result == 0], format="%d/%m/%Y")))
-  c <- ifelse(any(tmp$hosaq[tmp$result == 1] == 1) | any(tmp$reqorg[tmp$result == 1] == 1), 1, 0) 
-  t2$status[i] <- a
-  t2$COVIDdate[i] <- as.Date(b, origin="1970-01-01")
-  t2$hospital[i] <- c
-}
+covid1 <- covid1 %>% filter(result == 1) %>% group_by(eid) %>%
+  mutate(hospital = max(hosaq),
+         covid_date = min(as.Date(specdate, format="%d/%m/%Y"))) %>%
+  distinct(eid, .keep_all=TRUE)
+  
+covid1 <- covid1 %>% mutate(hospital = ifelse(hospital==1, 1, 0))
+covid1 <- covid1 %>% select(eid, result, hospital, covid_date)
 
-t2$COVIDdate <- as.Date(t2$COVIDdate, origin="1970-01-01")
-colnames(t2)[1] <- "ID"
-res <- merge(t, t2, by="ID", all.x=T)
+covid2 <- covid2 %>% filter(result == 1) %>% group_by(eid) %>%
+  mutate(hospital = ifelse(any(factype == 3), 1, 0),
+         covid_date = min(as.Date(specdate, format="%d/%m/%Y"))) %>%
+  distinct(eid, .keep_all=TRUE)
+covid2 <- covid2 %>% select(eid, result, hospital, covid_date)
 
-test2 <- fread("/home/richards/tomoko.nakanishi/09.COVID19/src/01.UKBB/01.GWAS/data/covid19_result_scotland_20210825.txt.gz")
-t1 <- test2
-t2 <- data.frame(unique(t1$eid))
-colnames(t2) <- "eid"
-for(i in seq(1,dim(t2)[1])){
-  tmp <- t1[t1$eid == t2$eid[i],]
-  a <- ifelse(any(tmp$result == 1), 1, 0)
-  b <- ifelse(any(tmp$result == 1), min(as.Date(tmp$specdate[tmp$result == 1], format="%d/%m/%Y")), max(as.Date(tmp$specdate[tmp$result == 0], format="%d/%m/%Y")))
-  c <- ifelse(any(tmp$factype[tmp$result == 1] == 3), 1, 0) 
-  res$status[res$ID == t2$eid[i]] <- a
-  res$COVIDdate[res$ID == t2$eid[i]] <- as.Date(b, origin="1970-01-01")
-  res$hospital[res$ID == t2$eid[i]] <- c
-}
+covid3 <- covid3 %>% filter(result == 1) %>% group_by(eid) %>%
+  mutate(hospital = ifelse(any(pattype == 7 & !(perstype %in% c(1:38,76:77,82:94,100:101))), 1, 0),
+         covid_date = min(as.Date(specdate, format="%d/%m/%Y"))) %>%
+  distinct(eid, .keep_all=TRUE)
+covid3 <- covid3 %>% select(eid, result, hospital, covid_date)
 
-test3 <- fread("/home/richards/tomoko.nakanishi/09.COVID19/src/01.UKBB/01.GWAS/data/covid19_result_wales_20210812.txt.gz")
-t1 <- test3
-t2 <- data.frame(unique(t1$eid))
-colnames(t2) <- "eid"
-for(i in seq(1,dim(t2)[1])){
-  tmp <- t1[t1$eid == t2$eid[i],]
-  a <- ifelse(any(tmp$result == 1), 1, 0)
-  b <- ifelse(any(tmp$result == 1), min(as.Date(tmp$specdate[tmp$result == 1], format="%d/%m/%Y")), max(as.Date(tmp$specdate[tmp$result == 0], format="%d/%m/%Y")))
-  c <- ifelse(any(tmp$pattype[tmp$result == 1] == 7 & !(tmp$perstype[tmp$result == 1] %in% c(1:38,76,77))), 1, 0) 
-  res$status[res$ID == t2$eid[i]] <- a
-  res$COVIDdate[res$ID == t2$eid[i]] <- as.Date(b, origin="1970-01-01")
-  res$hospital[res$ID == t2$eid[i]] <- c
-}
+covid <- bind_rows(covid1, covid2, covid3)
+covid <- covid %>% arrange(covid_date)
 
-res$status[is.na(res$status)] <- 0
-res$COVIDdate[is.na(res$COVIDdate)] <- max(as.Date(test1$specdate, format="%d/%m/%Y"))
-res$hospital[is.na(res$hospital)] <- 0
+covid <- covid %>% group_by(eid) %>%
+  mutate(hospital = max(hospital),
+         covid_date = min(covid_date)) %>% 
+  distinct(eid, .keep_all=TRUE)
 
-res$Duration <- round(as.numeric(as.Date(res$COVIDdate) - as.Date(res$`1stDATE`))/365)
-res$newage <- res$AGE + res$Duration
+t <- t %>% left_join(covid, by=c("ID"="eid"))
+t <- t %>% mutate(result = ifelse(is.na(result), 0, result),
+                  hospital = ifelse(is.na(hospital), 0, hospital),
+                  covid_date = ifelse(is.na(covid_date), as.Date(max(covid$covid_date)), as.Date(covid_date)))
 
-res <- res %>% rename(covid19_test = status)
+t$covid_date <- as.Date(t$covid_date, origin="1970/01/01")
+t$Duration <- round(as.numeric(as.Date(t$covid_date) - as.Date(t$`1stDATE`))/365)
+t$newage <- t$AGE + t$Duration
 
-saveRDS(res,file="LongCOVID1.rds")
+t <- t %>% rename(covid19_test = result)
+
+saveRDS(t,file="LongCOVID1.rds")
 
 res <- readRDS("LongCOVID1.rds")
 #####
 data <- res
 #hesin
-hesin_diag <- fread("/home/richards/tomoko.nakanishi/09.COVID19/src/01.UKBB/01.GWAS/data/hesin_diag_20210620.txt.gz", sep="\t")
-hesin <- fread("/home/richards/tomoko.nakanishi/09.COVID19/src/01.UKBB/01.GWAS/data/hesin_20210620.txt.gz", sep="\t")
-neg <- unique(res$ID[res$covid19_test == 0])
-tmp <- hesin[hesin$eid %in% neg,]
-hesin_new_neg <- merge(tmp, hesin_diag, by=c("eid", "ins_index"))
-hesin_new_neg <- hesin_new_neg %>% filter(diag_icd10 %in% c("U071","U072"))
-hesin_new_neg <- hesin_new_neg[order(as.Date(hesin_new_neg$epistart, format="%d/%m/%Y")),]
-hesin_new_neg <- hesin_new_neg[!duplicated(hesin_new_neg$eid),]
-data <- data %>% mutate(case_hesin = ifelse(ID %in% unique(hesin_new_neg$eid[hesin_new_neg$diag_icd10 %in% c("U071","U072")]), 1, 0))
-
-table(data$case_hesin)#488
-tmp <- data %>% filter(case_hesin == 1)
-for(i in seq(1,dim(tmp)[1])){
-  tmp_hesin <- hesin_new_neg %>% filter(eid == tmp$ID[i])
-  tmp$COVIDdate[i] <- as.Date(tmp_hesin$epistart, format="%d/%m/%Y")
-}
-data[data$case_hesin == 1,] <- tmp
-data <- data %>% mutate(hospital = case_when(case_hesin == 1 ~ 1,
+hesin_diag <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/hesin_diag_20210930.txt.gz")
+hesin_covid <- hesin_diag %>% filter(diag_icd10 %in% c("U071","U072"))
+data <- data %>% mutate(hospital = case_when(ID %in% hesin_covid$eid ~ 1,
                                              TRUE ~ hospital))
 
 
@@ -97,14 +69,10 @@ data <- data %>% mutate(hospital = case_when(case_hesin == 1 ~ 1,
 t <- fread("/home/richards/tomoko.nakanishi/09.COVID19/scratch/01.UKBB/02.LongCOVID/ukb27449_20688_Sx.tab.gz")
 
 #BMI
-t <- t %>% mutate(BMI = case_when(!is.na(f.21001.0.0) ~ f.21001.0.0,
-                                  !is.na(f.21001.1.0) ~ f.21001.1.0,
-                                  !is.na(f.21001.2.0) ~ f.21001.2.0))
+t <- t %>% mutate(BMI = f.21001.0.0)
 
 #self-reported ethnicity (white vs non-white as white being reference),  21000
 t <- t %>% mutate(ethnicity = case_when(f.21000.0.0 %in% c(1, 1001, 1002, 1003) ~ "0White",
-                                        f.21000.1.0 %in% c(1, 1001, 1002, 1003) ~ "0White",
-                                        f.21000.2.0 %in% c(1, 1001, 1002, 1003) ~ "0White",
                                         TRUE ~ "Non-white"))
 t$ethnicity[t$f.21000.0.0 %in% c(-1, -3)] <- NA
 #smoking
@@ -113,22 +81,8 @@ t <- t %>% mutate(smoking = case_when(f.1239.0.0 %in% c(1,2) ~ "Ever",
                                       f.1239.0.0 == 0 & f.1249.0.0 %in% c(2,3) & f.2644.0.0 == 1 ~ "Ever",
                                       f.1239.0.0 == -3 & f.1249.0.0 %in% c(1) ~ "Ever",
                                       f.1239.0.0 == -3 & f.1249.0.0 %in% c(2) & f.2644.0.0 == 1 ~ "Ever",
-                                      f.1239.1.0 %in% c(1,2) ~ "Ever",
-                                      f.1239.1.0 == 0 & f.1249.1.0 == 1 ~ "Ever",
-                                      f.1239.1.0 == 0 & f.1249.1.0 %in% c(2,3) & f.2644.1.0 == 1 ~ "Ever",
-                                      f.1239.1.0 == -3 & f.1249.1.0 %in% c(1) ~ "Ever",
-                                      f.1239.1.0 == -3 & f.1249.1.0 %in% c(2) & f.2644.1.0 == 1 ~ "Ever",
-                                      f.1239.2.0 %in% c(1,2) ~ "Ever",
-                                      f.1239.2.0 == 0 & f.1249.2.0 == 1 ~ "Ever",
-                                      f.1239.2.0 == 0 & f.1249.2.0 %in% c(2,3) & f.2644.2.0 == 1 ~ "Ever",
-                                      f.1239.2.0 == -3 & f.1249.2.0 %in% c(1) ~ "Ever",
-                                      f.1239.2.0 == -3 & f.1249.2.0 %in% c(2) & f.2644.2.0 == 1 ~ "Ever",
                                       f.1239.0.0 == 0 & f.1249.0.0 == 4 ~ "0Never",
-                                      f.1239.0.0 == 0 & f.1249.0.0 %in% c(2,3) & f.2644.0.0 == 0 ~ "0Never",
-                                      f.1239.1.0 == 0 & f.1249.1.0 == 4 ~ "0Never",
-                                      f.1239.1.0 == 0 & f.1249.1.0 %in% c(2,3) & f.2644.1.0 == 0 ~ "0Never",
-                                      f.1239.2.0 == 0 & f.1249.2.0 == 4 ~ "0Never",
-                                      f.1239.2.0 == 0 & f.1249.2.0 %in% c(2,3) & f.2644.2.0 == 0 ~ "0Never"))
+                                      f.1239.0.0 == 0 & f.1249.0.0 %in% c(2,3) & f.2644.0.0 == 0 ~ "0Never"))
 
 #non cancer illness
 t$hypertension <- 0
@@ -213,14 +167,15 @@ t <- t %>% mutate(asthma = case_when(f.22127.0.0 == 1 ~ 1,
                                        f.2443.2.0 == 1 ~ 1,
                                        TRUE ~ diabetes),
                   cancer = case_when(f.2453.0.0 == 1 ~ 1,
-                                     f.2443.1.0 == 1 ~ 1,
-                                     f.2443.2.0 == 1 ~ 1,
+                                     f.2453.1.0 == 1 ~ 1,
+                                     f.2453.2.0 == 1 ~ 1,
                                      f.22140.0.0 == 1 ~ 1,
                                      TRUE ~ cancer)
 )
 
 #ICD codings
-f <- fread("/home/richards/tomoko.nakanishi/09.COVID19/src/01.UKBB/01.GWAS/data/hesin_diag_20210620.txt.gz")
+f <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/hesin_diag_20210930.txt.gz")
+
 #asthma
 f1 <- f[grepl("^J45", f$diag_icd10),]
 t <- t %>% mutate(asthma = case_when(f.eid %in% f1$eid ~ 1,

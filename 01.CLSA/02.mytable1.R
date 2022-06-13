@@ -12,3 +12,11 @@ tableOne <- CreateTableOne(vars = Vars , strata = c("C2"), data = covid,
 tab3Mat <- print(tableOne, quote=F, noSpaces=TRUE)
 summary(tableOne)
 write.csv(tab3Mat, file = "myTable1.csv")
+
+dependent1 = c("Sx_any_PCS")
+explanatory1 = c("age", "sex", "obesity", "smoking", colnames(covid)[grepl("^com_", colnames(covid))], "hospital")
+
+
+covid %>% 
+  missing_compare(dependent1, explanatory1)
+

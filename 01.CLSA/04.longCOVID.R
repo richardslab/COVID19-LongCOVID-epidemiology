@@ -38,6 +38,24 @@ write.table(out, file="CLSA_summary.longCOVID.tsv", sep="\t", quote=F, col.names
 
 out %>% filter(Sx == "Sx_any_PCS") %>% select(-Sx) %>% write.xlsx("CLSA.longCOVID.xlsx")
 
+cases <- cases %>% filter(hospital == 0)
+
+LM1 <- glm(paste0(symptoms[1]," ~ age_range + sex + obesity + smoking + 
+               com_asthma + com_copd + com_hypertension + com_diabetes + com_autoimmune +
+               com_cancer + com_dementia"), data=cases, family="binomial")
+tmp <- cases[,c(symptoms[1],  "age_range", "sex", "obesity", "smoking", 
+                  "com_asthma", "com_copd", "com_hypertension", "com_diabetes", "com_autoimmune",
+                  "com_cancer", "com_dementia")]
+tmp <- tmp[complete.cases(tmp),]
+out <- data.frame(summary(LM1)$coefficients[-1,])
+out1 <- out %>% mutate(group = "CLSA",
+                       Sx = symptoms[1],
+                       casecontrol = "case",
+                       covariates = rownames(out),
+                       Ncase = sum(tmp[,symptoms[1]]),
+                       Ncontrol = dim(tmp)[1] - sum(tmp[,symptoms[1]]))
+write.table(out1, file="CLSA_summary.longCOVID.mild.tsv", sep="\t", quote=F, col.names = T, row.names = F, append=F)
+
 
 
 

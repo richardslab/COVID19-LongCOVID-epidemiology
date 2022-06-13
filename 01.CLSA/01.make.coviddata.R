@@ -245,16 +245,6 @@ covid <- covid %>% mutate(COVID19hospital = case_when(SYM_CARE_IP_COVX == 1 ~ 1,
                                                       TRUE ~ 0
 ))
 
-library(tableone)
-
-catVars <- c(colnames(covid)[grepl("^moderatesevere_", colnames(covid))])
-
-tableOne <- CreateTableOne(vars = catVars , strata = c("C2"), data = covid,
-                           factorVars = catVars )
-
-tab3Mat <- print(tableOne, quote=F, noSpaces=TRUE)
-write.csv(tab3Mat, file = "myTable1.csv")
-
 covid <- covid %>% mutate_at(.vars=vars(colnames(covid)[grepl("^Sx_", colnames(covid))]), 
                              .funs=funs(ifelse(.==-1,NA,.)))
 
@@ -348,8 +338,7 @@ covid <- covid %>% mutate(smoking = case_when(SMK_CURRCG_COVID %in% c(1,2) ~ "cu
                                                  CCC_CANC_COM == 1 ~ 1,
                                                  CCC_CANC_COF1 == 1 ~ 1,
                                                  TRUE ~ 0),
-                          com_dementia = case_when(CCC_LTC_CANC_COVID == 1 ~ 1,
-                                                   CCC_ALZH_COM == 1 ~ 1,
+                          com_dementia = case_when(CCC_ALZH_COM == 1 ~ 1,
                                                    CCC_ALZH_COF1 == 1 ~ 1,
                                                    TRUE ~ 0)
                           )

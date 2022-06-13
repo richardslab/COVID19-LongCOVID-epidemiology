@@ -12,19 +12,18 @@ d1 <- d[-6]
 colnames(d1)[1:5] <- c("ID", "SEX", "CENTRE","1stDATE","AGE")
 
 #withdrawal
-w <- fread("/scratch/richards/tomoko.nakanishi/09.COVID19/data/01.UKBB/w27449_20210809.csv")
+w <- read.csv("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/w27449_20220222.csv")
 colnames(w) <- "ID"
 d1$withdrawal <- 0
 d1$withdrawal[d1$ID %in% w$ID] <- 1
 d2 <- d1[d1$withdrawal == 0,]#486123
 d3 <- d2 %>% select(c("ID", "SEX", "CENTRE", "1stDATE", "AGE", "GTARRAY"))
 
-
 t <- d3
 t$PCS <- 0
 
 #longCOVID: PCS 
-gp <- fread("/home/richards/tomoko.nakanishi/09.COVID19/src/01.UKBB/01.GWAS/data/covid19_tpp_gp_clinical_20210520.txt.gz", sep="\t")
+gp <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/covid19_tpp_gp_clinical_20210831.txt.gz", sep="\t")
 max(as.Date(gp$event_dt[as.Date(gp$event_dt, format="%d/%m/%Y") < as.Date("2021-12-01")], format="%d/%m/%Y"))#"2021-04-23"
 #Y2b87	Post-COVID-19 syndrome
 #Y2b88	Signposting to Your COVID Recovery
@@ -34,19 +33,26 @@ id1 <- gp %>% filter(code_type == 1 & code %in% c("Y2b87", "Y2b89", "Y2b88","Y2b
 t <- t %>% mutate(PCS = case_when(ID %in% id1$eid ~ 1,
                                   TRUE ~ PCS))
 
-emis <- fread("/home/richards/tomoko.nakanishi/09.COVID19/src/01.UKBB/01.GWAS/data/covid19_emis_gp_clinical_20210810.txt.gz", sep="\t")
+emis <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/covid19_emis_gp_clinical_20210831.txt.gz", sep="\t")
 max(as.Date(emis$event_dt[as.Date(emis$event_dt, format="%d/%m/%Y") < as.Date("2021-12-01")], format="%d/%m/%Y"))#"2021-07-25"
 #Data-field 7689 #local EMIS code
 #data <- data %>% mutate(case_hesin = ifelse(ID %in% unique(id1), 1, case_hesin))
 #code_type == 2 > SNOMED CT from https://confluence.ihtsdotools.org/display/snomed/SNOMED+CT+COVID-19+Related+Content
-snomedct <- 
+snomedct <- read.csv("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/opensafely-assessment-instruments-and-outcome-measures-for-long-covid-79c0fa8a.csv")
+snomedct <- snomedct %>% mutate(code = as.factor(code))
+
+snomedct2 <- 
   c("1325161000000102", "1325181000000106", "1325021000000106", "1325031000000108", "1325041000000104",
     "1325051000000101", "1325061000000103", "1325071000000105", "1325081000000107", "1325091000000109",
     "1325101000000101", "1325121000000105", "1325131000000107", "1325141000000103", "1325151000000100")
-id1 <- emis %>% filter(code_type == 2 & code %in% snomedct)
+id1 <- emis %>% filter(code_type == 2 & (code %in% snomedct$code | code %in% snomedct2))
 t <- t %>% mutate(PCS = case_when(ID %in% id1$eid ~ 1,
                                   TRUE ~ PCS))
 sum(t$PCS)
+
+f <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/hesin_diag_20210930.txt.gz")
+date <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/hesin_20210930.txt.gz")
+f1 <- f[grepl("U09", f$diag_icd10),] #zero
 
 ##PVF
 t$PVF <- 0
@@ -65,8 +71,8 @@ code <- merge(t, f.20002, by="ID")
 t$PVF[grepl("1482", code$f.20002.x.x)] <- 1#2154
 
 # Diagnoses - main ICD10
-f <- fread("/home/richards/tomoko.nakanishi/09.COVID19/src/01.UKBB/01.GWAS/data/hesin_diag_20210620.txt.gz")
-date <- fread("/home/richards/tomoko.nakanishi/09.COVID19/src/01.UKBB/01.GWAS/data/hesin_20210620.txt.gz")
+f <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/hesin_diag_20210930.txt.gz")
+date <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/hesin_20210930.txt.gz")
 #G933	G93.3 Postviral fatigue syndrome
 f1 <- f[grepl("G933", f$diag_icd10),]
 f1 <- f1 %>% merge(date, by=c("eid", "ins_index"))
@@ -132,7 +138,7 @@ t <- t %>% mutate(PVF = case_when(ID %in% id1$eid ~ 1,
 #t <- t %>% mutate(fatigue = case_when(ID %in% id1$eid ~ 1,
 #                                      TRUE ~ fatigue))
 
-emis <- fread("/home/richards/tomoko.nakanishi/09.COVID19/src/01.UKBB/01.GWAS/data/covid19_emis_gp_clinical_20210810.txt.gz", sep="\t")
+#emis <- fread("/home/richards/tomoko.nakanishi/scratch/DATA/UKB/covid19_emis_gp_clinical_20210831.txt.gz", sep="\t")
 
 #EMISNQRE561	Reasn fr referrl:Chronic Fatigue Syndrome/Myalgic Encephalopathy
 #OLTR-AAA_GP_CFS	Test Request : GP Chronic Fatigue Syndrome

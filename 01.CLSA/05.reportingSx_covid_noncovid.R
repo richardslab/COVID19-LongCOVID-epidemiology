@@ -231,7 +231,7 @@ out1 <- out %>% mutate(group = "CLSA",
                        Ncase = sum(tmp[,"Sx_any"]),
                        Ncontrol = dim(tmp)[1] - sum(tmp[,"Sx_any"]))
 
-write.table(out1, file="CLSA_summary.interaction.tsv", sep="\t", quote=F, col.names = F, row.names = F, append=T)
+write.table(out1, file="CLSA_summary.interaction.tsv", sep="\t", quote=F, col.names = F, row.names = F, append=F)
 
 out1 <- out1 %>% mutate(OR = exp(Estimate),
                         LL = exp(Estimate - qnorm(0.975)*Std..Error),
